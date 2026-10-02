@@ -1,0 +1,318 @@
+/* Shell-expand row: the shipped bash row's geometry, tokens, and type scale,
+   with two deliberate divergences —
+     1. the header no longer needs a fixed 24px line, because it is not the place
+        the command is shown, and
+     2. the command lives ONLY in the card below, where the terminal banner wraps
+        it onto as many lines as it needs instead of being ellipsized.
+   The header is therefore one line: the tool title, then the call's description
+   (or the shipped argument summary when the call carries no description). Every
+   color resolves through --dsw-* tokens; the row borrows the figma "Bash ·
+   description" measurements the shipped bash toolview uses. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  /* The body-published font-size axis. Declared here with its identity value so
+     every `calc()` below reads it directly: a `var(--x, 0px)` fallback inside
+     `calc()` is only a syntax error when the property is actually missing, and
+     the resolved `0px` from this declaration keeps all of them valid even if
+     the surrounding shell stops publishing the axis. */
+  --dsh-content-font-delta: 0px;
+}
+
+/* A column so the header can wrap onto several lines: `height: auto` with the
+   body line height as its floor, and `overflow: visible` because the shared
+   DisclosureRow root clips its own 24px line (`.row { overflow: hidden }`),
+   which would swallow every wrapped line after the first. */
+.root {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+  transition: color 100ms ease;
+  overflow: visible;
+}
+
+.root[data-expandable] {
+  cursor: pointer;
+}
+
+.root:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    transition: none;
+  }
+}
+
+/* Top-aligned to the FIRST text line, then pulled down by half a line so the
+   glyph lands on the first line's optical centre without shifting the text. */
+.leading {
+  position: relative; /* .chevronHover overlay anchor */
+  flex: none;
+  width: calc(16px + var(--dsh-content-font-delta, 0px));
+  height: calc(16px + var(--dsh-content-font-delta, 0px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  /* `calc()` needs the property to exist: an unset `var()` with a fallback is a
+     syntax error *inside* a calc expression, while the same fallback is inert in
+     a plain value. The `.card` declaration above guarantees the property, and
+     the fallback keeps this rule valid on its own. */
+  margin-top: calc(12px + var(--dsh-content-font-delta, 0px) / 2 - 8px);
+  color: inherit;
+}
+
+/* Same glyph-scaling rule as DisclosureRow's leading: the CSS edge overrides
+   each svg's own attributes so the 14px business glyph follows the font-size
+   delta, while StateDot (its svg carries data-state) keeps its figma size. */
+.leading svg:not([data-state]) {
+  width: calc(14px + var(--dsh-content-font-delta, 0px));
+  height: calc(14px + var(--dsh-content-font-delta, 0px));
+}
+
+.chevron {
+  color: inherit;
+}
+
+/* The tool-name title participates in the wrapping flex line without shrinking:
+   a narrow column must truncate the command, never the name of the tool. */
+.title {
+  flex: none;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+/* Hover preview on the expandable row: the idle icon crossfades (100ms) into a
+   down chevron before the row is opened — the same overlay as ToolRow. */
+.iconIdle {
+  display: inline-flex;
+  opacity: 1;
+  transition: opacity 100ms ease;
+}
+
+.chevronHover {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.root:hover .iconIdle {
+  opacity: 0;
+}
+
+.root:hover .chevronHover {
+  opacity: 1;
+}
+
+/* The copy wrapper TextShimmer adds inside the disclosure row's own content
+   span (`contentClassName`); it carries the title and summary. `min-width: 0`
+   lets the summary truncate instead of pushing the title out of the row. */
+.contentLayout {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* The header line: leading icon, title, separator, summary. The summary is the
+   only element allowed to shrink, so the title survives a narrow column and a
+   long description is what truncates. */
+.content {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.title {
+  flex: none;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  border-radius: 1px;
+  margin: 0 8px;
+  background: var(--dsw-alias-label-caption);
+}
+
+/* The collapsing-line mode's summary: the call's Tool-authored description, or
+   the shipped one-line argument summary for a call that omits it. The command is
+   deliberately NOT here — it renders in the card below, so the header never
+   repeats it and a long command cannot occupy both the summary and the banner. */
+.summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+/* The fallback summary takes the error color on a failed row, matching the
+   shipped row's collapsed failure line. */
+.errorSummary {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Expanded terminal card, matching the stock bash row: 4px indent, l1 hairline,
+   and the max-height scroll on the card's own output. The banner's own
+   `--dsl-terminal-command-whitespace` is rebound to `pre-wrap` so the command
+   under the card wraps too — the primitive documents that variable as the
+   supported opt-in, and the pill/copy controls stay top-aligned beside the
+   first wrapped line. */
+.terminal {
+  --dsl-terminal-font: var(--dsw-font-markdown-code-block-small);
+  --dsl-terminal-line-height: 18px;
+  --dsl-terminal-output-max-height: 224px;
+  --dsl-terminal-command-whitespace: pre-wrap;
+  --dsl-terminal-line-whitespace: pre-wrap;
+  margin: 4px 0 4px 4px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+/* The live running-time readout beside the summary: elapsed alone, or
+   `elapsed / timeout` when the call states a deadline. It is the only place that
+   readout appears. `flex: none` keeps its own width (a ticking value must not
+   reflow the description under it), leaving the summary as the element that
+   truncates. */
+.elapsed {
+  flex: none;
+  margin-left: 8px;
+  color: var(--dsw-alias-label-caption);
+  font-family: var(--ds-font-family-code, monospace);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  /* Tabular figures: without them the label jitters as the digits change. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* A running call's command banner, for the shells the terminal card refuses to
+   draw (a backgrounded call, a persistent provider's). It holds the same
+   `TerminalBlock` a real card uses, so the prompt line, the wrapping and the
+   code font are identical; only the run-state dot is dropped, because the row's
+   own leading icon already carries that state. */
+.syntheticBody {
+  display: flex;
+  flex-direction: column;
+}
+
+/* IN/OUT fallback for shell calls that never produce terminal-card material:
+   a failed persistent-shell call, a cancellation, a spilled preview. */
+.ioCard {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 4px 4px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-markdown-code-block);
+  font: var(--dsw-font-markdown-code-block-small);
+}
+
+.ioSection {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  align-items: baseline;
+  padding: 12px 16px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.ioSection::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--dsw-radius-sm);
+}
+
+.ioSection::-webkit-scrollbar-track {
+  margin: 6px 0;
+}
+
+.ioLabel {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  color: var(--dsw-alias-label-caption);
+}
+
+.ioDivider {
+  flex: none;
+  height: 0.5px;
+  background: var(--dsw-alias-border-l2);
+}
+
+.ioText {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.ioText[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Hover-revealed Inspect pill under the expanded card — ToolRow's
+   .bodyWrap/.inspectButton treatment: real flow (it reserves its line),
+   revealed by hovering anywhere on the tool call, title row included, or by
+   keyboard focus. */
+.bodyWrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.inspectButton {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 2px 4px;
+  padding: 2px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 999px;
+  corner-shape: round;
+  /* Base background, not bg-overlay: the overlay token reads too heavy. */
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.card:hover .inspectButton,
+.inspectButton:focus-visible {
+  opacity: 1;
+}
+
+/* Solid hover fill: the pill floats over terminal output, so a translucent
+   hover token would let the text underneath bleed through. */
+.inspectButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

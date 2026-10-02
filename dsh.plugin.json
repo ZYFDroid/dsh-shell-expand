@@ -1,0 +1,12 @@
+{
+  "id": "@dsh-external/dsh-shell-expand",
+  "version": "0.1.8",
+  "main": "./lib/index.js",
+  "client": {
+    "main": "./lib/client.js",
+    "inject": []
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
+  }
+}
