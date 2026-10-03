@@ -1,4 +1,4 @@
 # dsh bundle patch: inserts this plugin into a profile's layer stack.
 - insert:
     - id: dsh-shell-expand
-      name: '@dsh-external/dsh-shell-expand'
+      name: dsh-shell-expand

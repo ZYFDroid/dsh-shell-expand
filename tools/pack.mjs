@@ -8,7 +8,7 @@
  * itself, drops `devDependencies` (their targets do not exist in a user's
  * profile), and tars the `package/` root the installer expects.
  *
- * Output: dist/dsh-external-dsh-shell-expand.tgz
+ * Output: dist/<manifest name>.tgz (a scope folds into the filename)
  * Usage:  node tools/pack.mjs
  */
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -36,7 +36,8 @@ delete manifest.devDependencies
 delete manifest.scripts
 writeFileSync(join(PACKAGE, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
-const tarball = join(DIST, 'dsh-external-dsh-shell-expand.tgz')
+// npm's own tarball naming: strip the scope marker, fold the scope separator.
+const tarball = join(DIST, `${manifest.name.replace(/^@/, '').replaceAll('/', '-')}.tgz`)
 const tar = spawnSync('tar', ['-czf', tarball, '-C', STAGE, 'package'], { stdio: 'inherit' })
 rmSync(STAGE, { recursive: true, force: true })
 

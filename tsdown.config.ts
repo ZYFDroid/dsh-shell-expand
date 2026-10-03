@@ -24,7 +24,7 @@ const require = createRequire(import.meta.url)
 /** The plugin root; CSS virtual ids stay project-root-relative so the emitted
  *  bundle carries no machine-specific absolute path. */
 const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
-const PLUGIN_ID = '@dsh-external/dsh-shell-expand'
+const PLUGIN_ID = 'dsh-shell-expand'
 
 /** Module specifiers the dsh web shell shares into its frozen module table
  *  (packages/client/web/src/platform.ts, the upstream single source of truth).

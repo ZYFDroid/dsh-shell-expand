@@ -1,7 +1,7 @@
 {
-  "name": "@dsh-external/dsh-shell-expand",
+  "name": "dsh-shell-expand",
   "description": "DSH shell-expand plugin: takes over the bash/pwsh tool rows so every shell call renders expanded by default, with the command wrapping in the terminal card instead of being compressed into one ellipsized line.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

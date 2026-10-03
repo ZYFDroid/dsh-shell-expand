@@ -115,7 +115,17 @@ const bundle = readFileSync(join(ROOT, 'lib', 'client.js'), 'utf8')
 const run = new Function('window', 'document', 'globalThis', bundle)
 run(windowStub, documentStub, globalThis)
 
-const PLUGIN_ID = '@dsh-external/dsh-shell-expand'
+// The plugin id is the manifest name — the same string pnpm records as the
+// profile dependency key, the bundle patch inserts as `name`, and the harness
+// then prints in the plugin list. Deriving it here means a rename cannot leave
+// the artifact behind.
+const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+const PLUGIN_ID = manifest.name
+// The plugin list shows this string verbatim, so an accidental scope makes the
+// entry read `@scope/name` next to unscoped siblings. Pin the display form.
+matches('the manifest name carries no npm scope', PLUGIN_ID, /^(?!@)[a-z0-9][a-z0-9._~-]*$/)
+is('dsh.plugin.json agrees with the manifest name', JSON.parse(readFileSync(join(ROOT, 'dsh.plugin.json'), 'utf8')).id, PLUGIN_ID)
+matches('the bundle patch inserts the same name', readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8'), new RegExp(`name:\\s*${PLUGIN_ID}\\s*$`, 'm'))
 ok(`the bundle registers itself as ${PLUGIN_ID}`, registered.has(PLUGIN_ID))
 const factory = registered.get(PLUGIN_ID)
 is('the registration carries a factory', typeof factory, 'function')

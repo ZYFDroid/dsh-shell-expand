@@ -127,38 +127,57 @@ process during startup, which the sandbox denies (`spawn EPERM` from
 
 The plugin is a normal dsh bundle, so it installs into a profile like any other.
 
+### From GitHub
+
+```powershell
+# Remove BEFORE adding: pnpm caches a git source by commit, so adding again
+# without a remove can leave the previous commit's build installed.
+dsh plugin --profile web remove dsh-shell-expand
+dsh plugin --profile web add "github:ZYFDroid/dsh-shell-expand"
+```
+
+The package name sits in three places at once, and all three are deliberately
+**unscoped**: pnpm records it as the profile dependency key, the bundle patch
+inserts it as the layer `name`, and the plugin list prints that `name` verbatim.
+A scope would therefore surface in the list as `@scope/name`. `pnpm run
+check:bundle` pins the display form so a rename cannot pass silently.
+
+### From a local tarball (offline)
+
 ```powershell
 # 1. Build: lib/index.js (node half) + lib/client.js (browser half).
 pnpm install --node-linker=hoisted --ignore-scripts --store-dir ..\.pnpm-store
 pnpm run build
 
-# 2. Pack a profile-installable tarball (writes dist\dsh-external-dsh-shell-expand.tgz).
+# 2. Pack a profile-installable tarball (writes dist\dsh-shell-expand.tgz).
 pnpm run pack
 
 # 3. Remove BEFORE adding. This step writes ~/.dsh, so run it with whatever host
 #    access your DSH file policy requires. pnpm caches a tarball by path, so
 #    skipping the remove can install the previous build's contents.
-dsh plugin --profile web remove @dsh-external/dsh-shell-expand
-dsh plugin --profile web add "C:\Users\ZYFDroid\Documents\DSHStudy\dsh-shell-expand\dist\dsh-external-dsh-shell-expand.tgz"
+dsh plugin --profile web remove dsh-shell-expand
+dsh plugin --profile web add "C:\Users\ZYFDroid\Documents\DSHStudy\dsh-shell-expand\dist\dsh-shell-expand.tgz"
 ```
 
-> Upgrading to 0.1.8: **remove first, then add.** Otherwise the tarball path
-> cache can leave the previous build installed.
+> 0.1.9 dropped the `@dsh-external/` scope, so upgrading from 0.1.8 or earlier
+> needs **two** commands: `dsh plugin --profile web remove
+> @dsh-external/dsh-shell-expand` clears the old key, then the add above records
+> the new one. Upgrades within one name still need **remove first, then add**,
+> because both the tarball path and a git ref are cached.
 
 Then restart `dsh web`. The client half takes effect for the transcript as soon
 as the page reloads; **no new session is required**, because the row is a pure
 rendering change over the session log the server already streams.
 
-Prefer the tarball over `dsh plugin --profile web add <this directory>`: on
+Prefer either route over `dsh plugin --profile web add <this directory>`: on
 Windows, a local-directory install mints a wrong `link:` junction target. The
-tarball also has its `devDependencies` stripped, which matter only for
-development and point at a harness checkout that does not exist in a user's
-profile.
+tarball additionally strips `devDependencies`, which matter only for development
+and point at a harness checkout that does not exist in a user's profile.
 
 Uninstall with:
 
 ```powershell
-dsh plugin --profile web remove @dsh-external/dsh-shell-expand
+dsh plugin --profile web remove dsh-shell-expand
 ```
 
 ## How the takeover works

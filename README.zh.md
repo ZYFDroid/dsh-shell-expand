@@ -90,33 +90,51 @@ vite 启动时会用管道子进程探测映射的网络驱动器，而沙箱会
 
 本插件就是一个普通的 dsh bundle，按常规方式装进 profile 即可。
 
+### 从 GitHub 安装
+
+```powershell
+# 先 remove 再 add：pnpm 按 commit 缓存 git 源，不 remove 直接 add 可能装到上一个 commit 的产物。
+dsh plugin --profile web remove dsh-shell-expand
+dsh plugin --profile web add "github:ZYFDroid/dsh-shell-expand"
+```
+
+包名同时出现在三个地方，且三处都刻意**不带 npm scope**：pnpm 把它记为 profile 的依赖键，
+bundle patch 把它作为层的 `name` 插入，插件列表又原样打印这个 `name`。所以一旦加 scope，
+列表里就会显示成 `@scope/name`。`pnpm run check:bundle` 把这个显示形态钉住了，
+改名不会静默通过。
+
+### 从本地 tarball 安装（离线）
+
 ```powershell
 # 1. 构建：lib/index.js（host 半）+ lib/client.js（浏览器半）。
 pnpm install --node-linker=hoisted --ignore-scripts --store-dir ..\.pnpm-store
 pnpm run build
 
-# 2. 打一个可装进 profile 的 tarball（产出 dist\dsh-external-dsh-shell-expand.tgz）。
+# 2. 打一个可装进 profile 的 tarball（产出 dist\dsh-shell-expand.tgz）。
 pnpm run pack
 
 # 3. 先 remove 再 add。这一步会写 ~/.dsh，请按你的 DSH 文件策略所需的主机权限运行。
 #    （pnpm 按路径缓存 tarball，改完重建后不 remove 可能装到旧内容。）
-dsh plugin --profile web remove @dsh-external/dsh-shell-expand
-dsh plugin --profile web add "C:\Users\ZYFDroid\Documents\DSHStudy\dsh-shell-expand\dist\dsh-external-dsh-shell-expand.tgz"
+dsh plugin --profile web remove dsh-shell-expand
+dsh plugin --profile web add "C:\Users\ZYFDroid\Documents\DSHStudy\dsh-shell-expand\dist\dsh-shell-expand.tgz"
 ```
 
-> 升级到 0.1.8：**必须先 `remove` 再 `add`**，否则可能命中 tarball 路径缓存、装到旧产物。
+> 0.1.9 去掉了 `@dsh-external/` 前缀，所以从 0.1.8 及更早版本升级需要**两条**命令：
+> 先 `dsh plugin --profile web remove @dsh-external/dsh-shell-expand` 清掉旧键，
+> 再执行上面的 add 写入新键。同名内的升级仍然是**必须先 `remove` 再 `add`**，
+> 因为 tarball 路径与 git ref 都会被缓存。
 
 然后重启 `dsh web`。客户端半在页面刷新后立即对对话记录生效；**不需要新开会话**，因为这行
 只是对服务器已经在推送的 session log 做一次纯渲染改写。
 
-请优先用 tarball，而不是 `dsh plugin --profile web add <本目录>`：在 Windows 上，按本地
-目录安装会拼出错误的 `link:` junction 目标。tarball 同时也剥掉了 `devDependencies`——
+请优先用上面两种方式，而不是 `dsh plugin --profile web add <本目录>`：在 Windows 上，
+按本地目录安装会拼出错误的 `link:` junction 目标。tarball 另外还剥掉了 `devDependencies`——
 它们只对开发有意义，并指向一个在使用者 profile 里并不存在的 harness checkout。
 
 卸载：
 
 ```powershell
-dsh plugin --profile web remove @dsh-external/dsh-shell-expand
+dsh plugin --profile web remove dsh-shell-expand
 ```
 
 ## 接管是怎么做的

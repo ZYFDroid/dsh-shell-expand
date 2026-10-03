@@ -1,6 +1,6 @@
 {
-  "id": "@dsh-external/dsh-shell-expand",
-  "version": "0.1.8",
+  "id": "dsh-shell-expand",
+  "version": "0.1.9",
   "main": "./lib/index.js",
   "client": {
     "main": "./lib/client.js",
