@@ -2,28 +2,15 @@
  * tsdown preset for dsh-shell-expand: a node-half stub with declarations plus
  * a browser half (lib/client.js) wrapped for the harness client-plugin loader.
  *
- * The browser half keeps the loader's platform module table external (react,
- * cordis, store, slots, primitives, dockkit) and inlines everything else, so
- * the model helpers it borrows from `ui-tool` travel inside this bundle
- * instead of asking the module table for an identity the shell does not seed.
- * That is the same posture `dsh-diff-viewer` uses for the same reason.
- *
- * CSS Modules compile through lightningcss into the class map plus one
- * `<style data-plugin-css>` tag injected when the factory runs (the official
- * client bundles' mechanism, so unload removes the stylesheet with the
- * plugin).
+ * The browser half imports nothing at all: it reads the DOM markers the shipped
+ * Tool rows publish and clicks a disclosure, so it requests no module from the
+ * loader's platform table and ships no stylesheet. The purity gate below stays
+ * as the guard against a future cross-plugin value import, which would either
+ * inline a duplicate instance or request a module-table key the shell never
+ * seeded.
  */
-import { readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { basename, dirname, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { transform } from 'lightningcss'
 import type { UserConfig } from 'tsdown'
 
-const require = createRequire(import.meta.url)
-/** The plugin root; CSS virtual ids stay project-root-relative so the emitted
- *  bundle carries no machine-specific absolute path. */
-const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
 const PLUGIN_ID = 'dsh-shell-expand'
 
 /** Module specifiers the dsh web shell shares into its frozen module table
@@ -39,9 +26,6 @@ const PLATFORM_MODULES = [
 ] as const
 
 const CLIENT_EXTERNALS: readonly string[] = [...PLATFORM_MODULES]
-
-const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
-const CSS_VIRTUAL_SUFFIX = '.mjs'
 
 export default [
   {
@@ -59,7 +43,7 @@ export default [
   },
   {
     // Browser bundle: lib/client.js, served by the harness at /plugins/<id>/client.js.
-    entry: { client: 'src/client/index.tsx' },
+    entry: { client: 'src/client/index.ts' },
     outDir: 'lib',
     format: 'cjs',
     platform: 'browser',
@@ -85,55 +69,6 @@ export default [
           `client bundle purity: "${source}" is not a platform module (CLIENT_EXTERNALS) — `
           + 'cross-plugin value imports are forbidden; collaborate through cordis services',
         )
-      },
-    }, {
-      // CSS Modules → hashed class map + one injected <style data-plugin-css> tag.
-      name: 'dsh-css-modules-inline',
-      resolveId(source: string, importer: string | undefined) {
-        if (!source.endsWith('.module.css')) return null
-        const abs = source.startsWith('@')
-          ? source
-          : importer !== undefined ? resolve(dirname(importer), source) : source
-        const display = source.startsWith('@')
-          ? abs
-          // Forward slashes on every platform keep a Windows build and a Linux
-          // CI build byte-identical.
-          : relative(PROJECT_ROOT, abs).replaceAll('\\', '/')
-        return CSS_VIRTUAL_PREFIX + display + CSS_VIRTUAL_SUFFIX
-      },
-      async load(virtualId: string) {
-        if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const raw = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
-        const fileId = raw.startsWith('@') ? require.resolve(raw) : resolve(PROJECT_ROOT, raw)
-        this.addWatchFile(fileId)
-        const source = await readFile(fileId)
-        const { code, exports: cssExports } = transform({
-          filename: fileId,
-          code: source,
-          // `[hash]` derives from the resolved absolute path, so a build on a
-          // different machine mints different class names; the basename is stable.
-          cssModules: { pattern: '[name]_[local]' },
-          minify: true,
-        })
-        const classMap: Record<string, string> = {}
-        // lightningcss exports its class map in hash-table order, which is not
-        // stable across builds — sort so the bundle is reproducible.
-        for (const local of Object.keys(cssExports ?? {}).sort()) classMap[local] = cssExports![local]!.name
-        const tagId = `${PLUGIN_ID}/${basename(fileId)}`
-        return [
-          `const css = ${JSON.stringify(code.toString())};`,
-          `const tagId = ${JSON.stringify(tagId)};`,
-          // `typeof document` keeps this a no-op outside a browser (a bundle
-          // smoke harness that evaluates the file in a non-DOM context).
-          `if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') === null) {`,
-          `  const tag = document.createElement('style');`,
-          `  tag.dataset.plugin = ${JSON.stringify(PLUGIN_ID)};`,
-          `  tag.dataset.pluginCss = tagId;`,
-          `  tag.textContent = css;`,
-          `  document.head.appendChild(tag);`,
-          `}`,
-          `export default ${JSON.stringify(classMap)};`,
-        ].join('\n')
       },
     }],
     outputOptions: {

@@ -3,17 +3,19 @@
  *
  * Loads the REAL production client bundle (`lib/client.js`) through the same
  * facade the dsh web shell uses — `window.__ModuleLoader__.load({ id, factory })`
- * — and checks the two contracts a plugin can break without any type error:
+ * — inside jsdom, and checks the three contracts a plugin can break without any
+ * type error:
  *
- * 1. **Registration.** The bundle registers under the plugin id, exports the
- *    `slots` injection, and claims the `bash` / `pwsh` toolview keys at a
- *    priority that shadows the shipped `bash` row.
- * 2. **The bundle actually loads.** Its factory runs to completion against a
- *    minimal module table and requests no platform module the shell does not
- *    seed, and the CSS it injects carries the wrapping rules that are the whole
- *    point of the plugin.
+ * 1. **Identity.** The bundle registers under the manifest name, and the
+ *    manifest, `dsh.plugin.json`, and the bundle patch all agree on it.
+ * 2. **Loading.** The factory runs to completion and requests NO platform module
+ *    (this half imports nothing), and the client half exports `apply` with an
+ *    empty `inject` list — it needs no cordis service.
+ * 3. **Behavior.** Applying it to a ctx double opens the shell rows present at
+ *    load and the ones inserted later, leaves every other tool row alone, and
+ *    stops observing when the fiber unloads.
  *
- * Rendered-DOM coverage lives in `tests/shell-row.spec.tsx` (vitest). That suite
+ * The rendered proof lives in `tests/auto-expand.spec.ts` (vitest). That suite
  * cannot start under a restricted Windows sandbox — vite probes mapped network
  * drives with a piped child process on startup, which the sandbox denies — so
  * this file is the check that works everywhere, and it verifies the shipped
@@ -24,6 +26,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { JSDOM } from 'jsdom'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -63,62 +66,10 @@ function matches(label, text, pattern) {
   if (!pattern.test(text)) failures.push(`${label}\n    pattern: ${String(pattern)}\n    text:    ${text.slice(0, 400)}`)
 }
 
-// ------------------------------------------------------------------- the shell
-/** Injected `<style>` tags, keyed the way the shell keys them. */
-const styleTags = new Map()
-/** Minimal `document.head` stand-in for the bundle's style injection. */
-const head = {
-  appendChild(node) {
-    styleTags.set(node.dataset.pluginCss, node.textContent)
-  },
-}
-const documentStub = {
-  head,
-  querySelector: () => null,
-  createElement: () => ({ dataset: {}, textContent: '' }),
-}
+/** Let the MutationObserver deliver its queued records. */
+const settle = () => new Promise((resolve) => { setTimeout(resolve, 0) })
 
-/**
- * Minimal `react/jsx-runtime` stand-in. Element creation runs at the bundle's
- * module scope (the row's icon constant), so the factory cannot execute without
- * these two exports; nothing here renders, so a descriptor is enough.
- */
-const jsxRuntime = {
-  jsx: (type, props, key) => ({ type, props, key }),
-  jsxs: (type, props, key) => ({ type, props, key }),
-  Fragment: Symbol('Fragment'),
-}
-
-/** The module table the shell seeds into every dynamic client bundle. */
-const platformModules = {
-  'react': {},
-  'react/jsx-runtime': jsxRuntime,
-  'react-dom': {},
-  'react-dom/client': {},
-  '@deepseek-ai/dsh-client-store': {},
-  '@deepseek-ai/dsh-client-ui-slots': {},
-  '@deepseek-ai/dsh-client-ui-primitives': {},
-  '@deepseek-ai/dsh-client-ui-dockkit': {},
-}
-
-/** Registrations handed to the loader facade, keyed by plugin id. */
-const registered = new Map()
-const windowStub = {
-  __ModuleLoader__: { load({ id, factory }) { registered.set(id, factory) } },
-  document: documentStub,
-}
-
-const bundle = readFileSync(join(ROOT, 'lib', 'client.js'), 'utf8')
-// One indirect eval with the shell's own globals in scope: the bundle's
-// top-level `window.__ModuleLoader__.load(...)` call and its CSS injection both
-// need to reach the stand-ins above.
-const run = new Function('window', 'document', 'globalThis', bundle)
-run(windowStub, documentStub, globalThis)
-
-// The plugin id is the manifest name — the same string pnpm records as the
-// profile dependency key, the bundle patch inserts as `name`, and the harness
-// then prints in the plugin list. Deriving it here means a rename cannot leave
-// the artifact behind.
+// ------------------------------------------------------------------- identity
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 const PLUGIN_ID = manifest.name
 // The plugin list shows this string verbatim, so an accidental scope makes the
@@ -126,101 +77,142 @@ const PLUGIN_ID = manifest.name
 matches('the manifest name carries no npm scope', PLUGIN_ID, /^(?!@)[a-z0-9][a-z0-9._~-]*$/)
 is('dsh.plugin.json agrees with the manifest name', JSON.parse(readFileSync(join(ROOT, 'dsh.plugin.json'), 'utf8')).id, PLUGIN_ID)
 matches('the bundle patch inserts the same name', readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8'), new RegExp(`name:\\s*${PLUGIN_ID}\\s*$`, 'm'))
+is('the manifest declares the runtime range the DOM markers need', manifest.engines?.dsh, '>=0.2.0-rc.2')
+
+// -------------------------------------------------------------------- loading
+const dom = new JSDOM('<!doctype html><html><body></body></html>')
+const { window } = dom
+const { document } = window
+
+/** Registrations handed to the loader facade, keyed by plugin id. */
+const registered = new Map()
+window.__ModuleLoader__ = { load({ id, factory }) { registered.set(id, factory) } }
+
+const bundle = readFileSync(join(ROOT, 'lib', 'client.js'), 'utf8')
+/** Every module specifier the factory asks for. */
+const requested = []
+// One indirect eval with the shell's own globals in scope: the bundle's
+// top-level `window.__ModuleLoader__.load(...)` call needs the stand-in above,
+// and its DOM reads need jsdom's document and constructors rather than Node's
+// (absent) globals.
+const run = new Function('window', 'document', 'Element', 'MutationObserver', bundle)
+run(window, document, window.Element, window.MutationObserver)
+
 ok(`the bundle registers itself as ${PLUGIN_ID}`, registered.has(PLUGIN_ID))
 const factory = registered.get(PLUGIN_ID)
 is('the registration carries a factory', typeof factory, 'function')
-
-/** Module specifiers the factory actually requested. */
-const requested = []
 const plugin = factory((specifier) => {
   requested.push(specifier)
-  const module = platformModules[specifier]
-  if (module === undefined) throw new Error(`unknown platform module requested: ${specifier}`)
-  return module
+  throw new Error(`unknown platform module requested: ${specifier}`)
 })
-
 ok('the factory returned the plugin namespace', plugin !== undefined && plugin !== null)
 is('the client half exports apply', typeof plugin.apply, 'function')
-is('the client half injects the slots service', JSON.stringify(plugin.inject), JSON.stringify(['slots']))
-is(
-  'the bundle requests only seeded platform modules',
-  requested.filter(specifier => !(specifier in platformModules)).join(', '),
-  '',
-)
+is('the client half needs no cordis service', JSON.stringify(plugin.inject), '[]')
+is('the bundle requests no platform module at all', requested.join(', '), '')
 
-// ------------------------------------------------------- Hook-order structure
-// React error #300 ("Rendered fewer hooks than expected") fires when one mounted
-// component changes how many Hooks it calls between two renders. A keyed row's
-// component instance survives the `preparing → start → result` transitions, and
-// `useToolCallArgumentsPartial` is only valid while preparing, so the preparing
-// phase must be a component of its own that the started phase replaces as a
-// different element type (which unmounts it and resets the Hook list). The
-// rendered proof is `tests/shell-row.spec.tsx`; these are the artifact-level
-// signals that the split is still in place.
-ok('the preparing row is its own component in the bundle', bundle.includes('PreparingShellRow'))
-ok('the started row is its own component in the bundle', bundle.includes('StartedShellRow'))
-// Settlement must come from the framework's `phase`, never from the block's own
-// discriminant. Inferring it from `'kind' in block` read a start-phase block that
-// carried a `kind` as settled, which took the arguments from the absent result
-// call head: an empty payload, no terminal card, and the bare-arguments fallback
-// where the command should be.
-ok('the row does not infer settlement from the block discriminant', !bundle.includes('"kind" in'))
-// The phase dispatcher is the ONLY thing ShellRow may do: it must not reach for
-// the preparing-only Hook out here.
-const shellRowBody = /function ShellRow\([^)]*\)\s*\{([^}]*)\}/.exec(bundle)?.[1] ?? ''
-ok('the row dispatcher itself calls no Hook', shellRowBody !== '' && !shellRowBody.includes('use'))
-
-// -------------------------------------------------------------- registration
-/** The registered toolviews, keyed by the tool name they claim. */
-const registrations = new Map()
-const ctx = {
-  slots: {
-    inject(name, run) {
-      is('the contribution waits on the toolview slot', name, 'tool.call.toolview')
-      for (const _ of run()) { /* drain: registrations land in the map below */ }
-    },
-    register(options, component) {
-      registrations.set(options.key, { options, component })
-      return () => {}
-    },
-  },
+// ------------------------------------------------------------------- behavior
+/**
+ * Make one element the row's disclosure target, behaving like React's: a press
+ * flips `aria-expanded` and grows or drops the body.
+ * @param {object} row - the fixture row being wired.
+ * @returns {object} the fixture row.
+ */
+function wire(row) {
+  row.header.setAttribute('data-expandable', '')
+  row.header.setAttribute('aria-expanded', 'false')
+  row.header.addEventListener('click', () => {
+    row.clicks += 1
+    const open = row.header.getAttribute('aria-expanded') === 'true'
+    row.header.setAttribute('aria-expanded', open ? 'false' : 'true')
+    const body = row.root.querySelector('[data-body]')
+    if (open) {
+      body?.remove()
+      return
+    }
+    const next = document.createElement('div')
+    next.setAttribute('data-body', '')
+    row.root.append(next)
+  })
+  return row
 }
-plugin.apply(ctx)
 
-is('both shell keys are claimed', [...registrations.keys()].join(','), 'bash,pwsh')
-is('bash shadows the shipped row', registrations.get('bash')?.options.priority, -1)
-is('pwsh shadows the shipped row', registrations.get('pwsh')?.options.priority, -1)
-is('the row declares the conversation namespace', registrations.get('bash')?.options.locale, 'conversation')
-is('the row is a React component', typeof registrations.get('bash')?.component, 'function')
+/**
+ * A row whose header IS the row element: the shipped bash row's shape.
+ * @param {Record<string, string>} attributes - the row's published markers.
+ * @returns {object} the fixture row.
+ */
+function headerRow(attributes) {
+  const root = document.createElement('div')
+  for (const [name, value] of Object.entries(attributes)) root.setAttribute(name, value)
+  return wire({ root, header: root, clicks: 0 })
+}
 
-// ---------------------------------------------------------------------- styles
-is('the bundle injected one stylesheet', styleTags.size, 1)
-const css = [...styleTags.values()][0] ?? ''
-matches('the header summary stays a single truncated line', css, /text-overflow:\s*ellipsis/)
-// lightningcss lowers `flex: 1 1 auto` to its `flex: auto` equivalent.
-matches('the summary is the element that shrinks', css, /flex:\s*auto/)
-matches('a long unbroken token still breaks', css, /word-break:\s*break-word/)
-matches('the terminal banner wraps the command', css, /--dsl-terminal-command-whitespace:\s*pre-wrap/)
-matches('the terminal output wraps too', css, /--dsl-terminal-line-whitespace:\s*pre-wrap/)
-matches('the disclosure row stops clipping', css, /overflow:\s*visible/)
-// The header must never re-render the command: doing so duplicated a long command
-// into both the summary row and the banner, which is the second reported defect.
-ok('the row has no header-command rule of its own', !/\.shell-row-module_command/.test(css))
-// A running call must show the command it is running, even when the terminal card
-// refuses to draw it (a backgrounded or persistent shell). The marker is that
-// banner's own body.
-ok('the bundle carries the running-command body marker', bundle.includes('data-shell-running-body'))
-matches('the running-command body lays out as a column', css, /\.shell-row-module_syntheticBody\{/)
-// The elapsed clock: a running call reports how long it has been going, in ONE
-// place. Rendering the same readout twice (once in the header, once above the
-// card) is the defect this pins — it read as "one time became two" on remount.
-ok('the bundle carries the elapsed-label class', /\.shell-row-module_elapsed\{/.test(css))
-matches('the elapsed label uses tabular figures so it does not jitter', css, /font-variant-numeric:\s*tabular-nums/)
-is('the elapsed readout has exactly one stylesheet rule', (css.match(/shell-row-module_elapsed/g) ?? []).length, 1)
-ok('the bundle no longer carries a second readout site', !bundle.includes('data-shell-running-meta'))
-// The paired form `elapsed / timeout` is composed in the row, and the timeout
-// side comes from the call's own argument rather than the stylesheet.
-matches('the readout composes elapsed over timeout', bundle, /`\$\{elapsed\} \/ \$\{timeout\}`/)
+/**
+ * A row that nests its disclosure row: the generic Tool row's shape.
+ * @param {Record<string, string>} attributes - the row's published markers.
+ * @returns {object} the fixture row.
+ */
+function nestedRow(attributes) {
+  const root = document.createElement('div')
+  for (const [name, value] of Object.entries(attributes)) root.setAttribute(name, value)
+  const header = document.createElement('div')
+  header.setAttribute('data-disclosure-header', '')
+  const disclosure = document.createElement('div')
+  disclosure.setAttribute('data-disclosure-row', '')
+  header.append(disclosure)
+  root.append(header)
+  return wire({ root, header: disclosure, clicks: 0 })
+}
+
+const bashRow = headerRow({ 'data-sample': 'bash', 'data-variant': 'bash', 'data-state': 'running' })
+const pwshRow = nestedRow({ 'data-tool': 'pwsh', 'data-variant': 'pwsh', 'data-state': 'running' })
+const editRow = nestedRow({ 'data-tool': 'edit', 'data-variant': 'edit', 'data-state': 'running' })
+const historyRow = nestedRow({ 'data-tool': 'bash', 'data-variant': 'bash', 'data-state': 'ok' })
+const foldedRow = nestedRow({ 'data-tool': 'pwsh', 'data-variant': 'pwsh', 'data-state': 'running' })
+const foldedTurn = document.createElement('div')
+foldedTurn.setAttribute('data-turn-process-hidden', '')
+foldedTurn.append(foldedRow.root)
+document.body.append(bashRow.root, pwshRow.root, editRow.root, historyRow.root, foldedTurn)
+
+/** The effect disposer the client fiber would run on unload. */
+let dispose = () => {}
+plugin.apply({
+  effect(effect) {
+    const cleanup = effect()
+    dispose = () => { cleanup?.() }
+    return dispose
+  },
+})
+await settle()
+
+is('the running bash row already rendered at load opens', bashRow.clicks, 1)
+is('the running pwsh row already rendered at load opens', pwshRow.clicks, 1)
+is('a non-shell row is left alone', editRow.clicks, 0)
+is('a settled row rendered at load stays collapsed', historyRow.clicks, 0)
+is('a row inside a folded Turn is left alone', foldedRow.clicks, 0)
+is('the opened row records what the plugin did', bashRow.root.getAttribute('data-shell-expand'), 'opened')
+is('the expanded row renders its body', bashRow.root.querySelector('[data-body]') === null, false)
+
+const laterRow = headerRow({ 'data-sample': 'bash', 'data-state': 'running' })
+document.body.append(laterRow.root)
+await settle()
+is('a running shell row inserted later opens too', laterRow.clicks, 1)
+
+const laterHistory = headerRow({ 'data-sample': 'bash', 'data-state': 'ok' })
+document.body.append(laterHistory.root)
+await settle()
+is('a settled row inserted later stays collapsed', laterHistory.clicks, 0)
+
+// A collapse the user performs must survive a later render.
+bashRow.header.setAttribute('aria-expanded', 'false')
+await settle()
+is('a user collapse is not undone', bashRow.clicks, 1)
+
+dispose()
+const afterUnload = headerRow({ 'data-sample': 'bash', 'data-state': 'running' })
+document.body.append(afterUnload.root)
+await settle()
+is('the observer stops when the fiber unloads', afterUnload.clicks, 0)
 
 // ------------------------------------------------------------------- reporting
 for (const failure of failures) console.error(`FAIL  ${failure}`)

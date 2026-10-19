@@ -1,7 +1,7 @@
 {
   "name": "dsh-shell-expand",
-  "description": "DSH shell-expand plugin: takes over the bash/pwsh tool rows so every shell call renders expanded by default, with the command wrapping in the terminal card instead of being compressed into one ellipsized line.",
-  "version": "0.1.9",
+  "description": "DSH shell-expand plugin: opens a running bash/pwsh tool row as soon as it has something to expand, so reading the command a call ran never needs a click. History stays collapsed, so Chat's collapse-timing setting keeps long transcripts cheap. It renders no card of its own: the shipped rows already wrap the command and report the exit status.",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -14,6 +14,9 @@
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
   },
   "files": [
     "lib",
@@ -28,11 +31,10 @@
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "test": "vitest run",
-    "check:model": "node --import ./tools/register-ts-resolve.mjs tools/run-model-checks.mjs",
     "check:bundle": "node tools/run-bundle-smoke.mjs",
     "pack": "node tools/pack.mjs",
-    "check:portable": "pnpm run typecheck && pnpm run check:model && pnpm run build && pnpm run check:bundle",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run build"
+    "check:portable": "pnpm run typecheck && pnpm run build && pnpm run check:bundle",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:bundle"
   },
   "dsh": {
     "bundle": {
@@ -43,33 +45,13 @@
       "platform": "web"
     }
   },
-  "dependencies": {
-    "clsx": "^2.1.1"
-  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-client-ui-primitives": "*",
-    "@deepseek-ai/dsh-client-ui-slots": "*",
-    "react": "^18.2.0"
+    "@deepseek-ai/cordis": "^4.0.4"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../deepseek-harness/vendor/cordis",
-    "@deepseek-ai/dsh-client-locale": "link:../deepseek-harness/packages/client/locale",
-    "@deepseek-ai/dsh-client-ui-chat": "link:../deepseek-harness/packages/client/ui-chat",
-    "@deepseek-ai/dsh-client-ui-conversation": "link:../deepseek-harness/packages/client/ui-conversation",
-    "@deepseek-ai/dsh-client-ui-primitives": "link:../deepseek-harness/packages/client/ui-primitives",
-    "@deepseek-ai/dsh-client-ui-renderer": "link:../deepseek-harness/packages/client/ui-renderer",
-    "@deepseek-ai/dsh-client-ui-slots": "link:../deepseek-harness/packages/client/ui-slots",
-    "@deepseek-ai/dsh-client-ui-tool": "link:../deepseek-harness/packages/client/ui-tool",
-    "@deepseek-ai/dsh-util-workspace-path": "link:../deepseek-harness/packages/util/workspace-path",
-    "@testing-library/react": "^16.1.0",
     "@types/node": "^22.0.0",
-    "@types/react": "~18.3.1",
-    "@types/react-dom": "~18.3.1",
     "jsdom": "^26.0.0",
-    "lightningcss": "^1.30.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.1"
